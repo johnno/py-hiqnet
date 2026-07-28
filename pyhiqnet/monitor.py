@@ -58,6 +58,19 @@ def _pwr(db: float, ohms: float) -> float:
 
 def _net_thread():
     async def _run():
+        import socket as _socket
+
+        # Show what IP we detect before connecting
+        try:
+            s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+            s.connect((HOST, 3804))
+            probe_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            probe_ip = "unknown"
+        with _lock:
+            _status.append(f"Pre-connect probe IP: {probe_ip}")
+
         client = CrownAmpClient(HOST)
 
         def _on_update(channels):
@@ -71,8 +84,18 @@ def _net_thread():
             with _lock:
                 _status.append(f"TCP connecting to {HOST}:3804 …")
             await client.async_connect()
+            # Show what the library actually used
+            tcp_ip = "unknown"
+            if client._writer:
+                sn = client._writer.get_extra_info("sockname")
+                if sn: tcp_ip = sn[0]
+            our_ip_bytes = client._our_ip
+            our_ip_str = _socket.inet_ntoa(our_ip_bytes) if our_ip_bytes else "not set"
             with _lock:
-                _status.append("Connected — TCP+UDP active")
+                _status.append(f"TCP src IP: {tcp_ip}  DiscoInfo IP: {our_ip_str}")
+            await asyncio.sleep(1)
+            with _lock:
+                _status.append("Connected — TCP+UDP active (watching for meter data)")
         except Exception as exc:
             with _lock:
                 _status.append(f"Connection failed: {exc}")
