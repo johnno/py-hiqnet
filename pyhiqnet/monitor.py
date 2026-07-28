@@ -60,17 +60,45 @@ def _net_thread():
     async def _run():
         import socket as _socket
 
-        # Show what IP we detect before connecting
-        try:
-            s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
-            s.connect((HOST, 3804))
-            probe_ip = s.getsockname()[0]
-            s.close()
-        except Exception:
-            probe_ip = "unknown"
+        # ── raw TCP probe: send subscription and show what comes back ──────
         with _lock:
-            _status.append(f"Pre-connect probe IP: {probe_ip}")
+            _status.append(f"Raw TCP probe to {HOST}:3804 …")
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(HOST, 3804), timeout=5
+            )
+            # Send just DISCOINFO to see if Crown responds at all
+            our_mac = b'\x0e\xd7\xe8\x1b\x3c\x84'
+            our_ip  = _socket.inet_aton(writer.get_extra_info('sockname')[0])
+            pl = (b'\xf5\x4c\x01\x00\x00\x10' + b'\x00'*6 + our_mac +
+                  b'\x00\x10\x00\x00\x27\x10\x01' + our_mac +
+                  b'\x00' + our_ip + b'\xff\xff\xff\x00' + b'\x00'*4)
+            hdr = b'\x02\x19\x00\x00' + (24+len(pl)).to_bytes(2,'big') + \
+                  b'\xf5\x4c\x01\x00\x00\x00' + b'\x20\x6c\x00\x00\x00\x00' + \
+                  b'\x00\x00\x00\x00\x05\x00'
+            writer.write(hdr + pl)
+            await writer.drain()
+            buf = b""
+            try:
+                chunk = await asyncio.wait_for(reader.read(65536), timeout=3.0)
+                buf = chunk
+            except (asyncio.TimeoutError, TimeoutError):
+                pass
+            writer.close()
+            try: await writer.wait_closed()
+            except Exception: pass
+            with _lock:
+                if buf:
+                    mt = buf[18:20].hex() if len(buf) >= 20 else '??'
+                    sn = int.from_bytes(buf[6:8], 'big') if len(buf) >= 8 else 0
+                    _status.append(f"Crown replied: {len(buf)}b  msg=0x{mt}  src_node=0x{sn:04X}")
+                else:
+                    _status.append("Crown sent NOTHING back to DISCOINFO — check amp IP/network")
+        except Exception as exc:
+            with _lock:
+                _status.append(f"Raw probe failed: {exc}")
 
+        # ── now run the library ─────────────────────────────────────────────
         client = CrownAmpClient(HOST)
 
         def _on_update(channels):
@@ -82,20 +110,18 @@ def _net_thread():
 
         try:
             with _lock:
-                _status.append(f"TCP connecting to {HOST}:3804 …")
+                _status.append(f"Connecting via pyhiqnet …")
             await client.async_connect()
-            # Show what the library actually used
             tcp_ip = "unknown"
             if client._writer:
                 sn = client._writer.get_extra_info("sockname")
                 if sn: tcp_ip = sn[0]
-            our_ip_bytes = client._our_ip
-            our_ip_str = _socket.inet_ntoa(our_ip_bytes) if our_ip_bytes else "not set"
+            our_ip_str = _socket.inet_ntoa(client._our_ip) if client._our_ip else "not set"
             with _lock:
-                _status.append(f"TCP src IP: {tcp_ip}  DiscoInfo IP: {our_ip_str}")
-            await asyncio.sleep(1)
+                _status.append(f"TCP={tcp_ip}  DiscoIP={our_ip_str}  CrownNode=0x{client.crown_node:04X}")
+            await asyncio.sleep(0.5)
             with _lock:
-                _status.append("Connected — TCP+UDP active (watching for meter data)")
+                _status.append(f"Channels populated: {len(_snap)}/8")
         except Exception as exc:
             with _lock:
                 _status.append(f"Connection failed: {exc}")
