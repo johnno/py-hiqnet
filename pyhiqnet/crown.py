@@ -302,10 +302,10 @@ class CrownAmpClient:
 
     async def _start_udp(self) -> None:
         loop = asyncio.get_running_loop()
-        # Try binding with reuse_port first (Linux), fall back without it (macOS/Windows)
+        # reuse_address was removed in Python 3.12; reuse_port not on all platforms
         for kwargs in [
-            {"local_addr": ("0.0.0.0", UDP_PORT), "reuse_address": True, "reuse_port": True},
-            {"local_addr": ("0.0.0.0", UDP_PORT), "reuse_address": True},
+            {"local_addr": ("0.0.0.0", UDP_PORT), "reuse_port": True},
+            {"local_addr": ("0.0.0.0", UDP_PORT)},
         ]:
             try:
                 transport, _ = await loop.create_datagram_endpoint(
