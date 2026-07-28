@@ -149,7 +149,7 @@ class _UDPProtocol(asyncio.DatagramProtocol):
 
         elif msg_type == MSG_MULTISET:
             tl = struct.unpack_from(">H", data, 4)[0]
-            payload = data[HEADER_SIZE:tl]   # was data[20:] — header is 24 bytes not 20
+            payload = data[24:tl]   # header is 24 bytes
             self._client._process_multiobj(parse_multiobj_payload(payload))
 
     def error_received(self, exc: Exception) -> None:
