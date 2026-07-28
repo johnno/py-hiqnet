@@ -230,7 +230,10 @@ class CrownAmpClient:
         )
         await self._subscribe()
         await self._read_initial_state()
-        await self._start_udp()
+        try:
+            await self._start_udp()
+        except Exception as exc:  # UDP is best-effort — never crash the integration
+            _LOGGER.warning("UDP setup failed (%s) — meter data unavailable", exc)
         self._tasks = [
             asyncio.ensure_future(self._keepalive_loop()),
             asyncio.ensure_future(self._tcp_reader_loop()),
@@ -302,7 +305,7 @@ class CrownAmpClient:
 
     async def _start_udp(self) -> None:
         loop = asyncio.get_running_loop()
-        # reuse_address was removed in Python 3.12; reuse_port not on all platforms
+        # reuse_address removed in Python 3.12; reuse_port unavailable on some platforms
         for kwargs in [
             {"local_addr": ("0.0.0.0", UDP_PORT), "reuse_port": True},
             {"local_addr": ("0.0.0.0", UDP_PORT)},
@@ -318,7 +321,7 @@ class CrownAmpClient:
                     await asyncio.sleep(0.3)
                 _LOGGER.info("UDP bound on port %d — meter data active", UDP_PORT)
                 return
-            except OSError as exc:
+            except Exception as exc:  # catches OSError, TypeError, etc.
                 _LOGGER.debug("UDP bind attempt failed (%s), retrying…", exc)
         _LOGGER.warning("UDP bind failed — meter data unavailable")
 
