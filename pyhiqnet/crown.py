@@ -59,10 +59,22 @@ from .protocol import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Our HiQnet node ID (arbitrary; must not clash with any real device on network)
-DEFAULT_OUR_NODE = 0xF54C
 CROWN_DEFAULT_PORT = HIQNET_PORT
 UDP_PORT = 3804
+
+
+def _derive_our_node(mac: bytes) -> int:
+    """Derive a unique HiQnet node ID from the host MAC address.
+
+    Uses the last two bytes of the MAC so each host gets a stable,
+    unique ID — avoiding collisions when multiple instances run on
+    different machines pointing at the same Crown amp.
+    Avoids 0x0000 and 0xFFFF which are reserved in HiQnet.
+    """
+    node = (mac[4] << 8) | mac[5]
+    if node in (0x0000, 0xFFFF):
+        node = 0x1234  # safe fallback
+    return node
 
 
 def _get_our_ip(host: str) -> bytes:
@@ -180,16 +192,17 @@ class CrownAmpClient:
         host: str,
         port: int = CROWN_DEFAULT_PORT,
         crown_node: int = 0x206C,
-        our_node: int = DEFAULT_OUR_NODE,
+        our_node: int | None = None,
         our_mac: bytes | None = None,
         our_ip: bytes | None = None,
     ) -> None:
         self.host = host
         self.port = port
         self.crown_node = crown_node
-        self._our_node = our_node
         self._our_mac = our_mac or _get_our_mac()
-        self._our_ip  = our_ip  or _get_our_ip(host)
+        # Derive node ID from MAC so each host is unique on the HiQnet network
+        self._our_node = our_node if our_node is not None else _derive_our_node(self._our_mac)
+        self._our_ip   = our_ip  or _get_our_ip(host)
 
         self._channels: dict[int, CrownChannel] = {
             ch: CrownChannel(number=ch) for ch in range(1, 9)
