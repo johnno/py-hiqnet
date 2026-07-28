@@ -301,21 +301,26 @@ class CrownAmpClient:
         _LOGGER.debug("Initial state read: %s", list(self._channels.values()))
 
     async def _start_udp(self) -> None:
-        loop = asyncio.get_event_loop()
-        try:
-            transport, _ = await loop.create_datagram_endpoint(
-                lambda: _UDPProtocol(self),
-                local_addr=("", UDP_PORT),
-                reuse_port=True,
-            )
-            self._udp_transport = transport
-            # Announce ourselves so the Crown adds a UDP route to our node
-            for _ in range(3):
-                transport.sendto(self._disco_i, (self.host, UDP_PORT))
-                await asyncio.sleep(0.3)
-            _LOGGER.info("UDP bound on port %d — meter data active", UDP_PORT)
-        except OSError as exc:
-            _LOGGER.warning("UDP bind failed (%s) — meter data unavailable", exc)
+        loop = asyncio.get_running_loop()
+        # Try binding with reuse_port first (Linux), fall back without it (macOS/Windows)
+        for kwargs in [
+            {"local_addr": ("0.0.0.0", UDP_PORT), "reuse_address": True, "reuse_port": True},
+            {"local_addr": ("0.0.0.0", UDP_PORT), "reuse_address": True},
+        ]:
+            try:
+                transport, _ = await loop.create_datagram_endpoint(
+                    lambda: _UDPProtocol(self), **kwargs
+                )
+                self._udp_transport = transport
+                # Announce ourselves so the Crown adds a UDP route to our node
+                for _ in range(3):
+                    transport.sendto(self._disco_i, (self.host, UDP_PORT))
+                    await asyncio.sleep(0.3)
+                _LOGGER.info("UDP bound on port %d — meter data active", UDP_PORT)
+                return
+            except OSError as exc:
+                _LOGGER.debug("UDP bind attempt failed (%s), retrying…", exc)
+        _LOGGER.warning("UDP bind failed — meter data unavailable")
 
     async def _keepalive_loop(self) -> None:
         while True:
