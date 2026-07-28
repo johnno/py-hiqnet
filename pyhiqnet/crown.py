@@ -228,6 +228,22 @@ class CrownAmpClient:
         self._reader, self._writer = await asyncio.wait_for(
             asyncio.open_connection(self.host, self.port), timeout=10
         )
+
+        # Get our actual IP from the established TCP socket — critical in Docker/containers
+        # where a pre-connect UDP probe returns the bridge IP the Crown can't reach.
+        sockname = self._writer.get_extra_info("sockname")
+        if sockname:
+            our_ip_str = sockname[0]
+            self._our_ip = socket.inet_aton(our_ip_str)
+            _LOGGER.info("Local IP toward Crown: %s", our_ip_str)
+            # Rebuild DiscoInfo with the corrected IP
+            self._disco_q = build_discoinfo(
+                self._our_node, self.crown_node, self._our_mac, self._our_ip, info=False
+            )
+            self._disco_i = build_discoinfo(
+                self._our_node, self.crown_node, self._our_mac, self._our_ip, info=True
+            )
+
         await self._subscribe()
         await self._read_initial_state()
         try:
@@ -284,8 +300,9 @@ class CrownAmpClient:
     async def _read_initial_state(self) -> None:
         assert self._reader is not None
         buf = b""
-        deadline = asyncio.get_event_loop().time() + 6.0
-        while asyncio.get_event_loop().time() < deadline:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 6.0
+        while loop.time() < deadline:
             try:
                 chunk = await asyncio.wait_for(self._reader.read(65536), timeout=1.0)
                 if not chunk:
@@ -294,14 +311,20 @@ class CrownAmpClient:
             except (asyncio.TimeoutError, TimeoutError):
                 pass
 
+        _LOGGER.info("TCP initial read: %d bytes", len(buf))
+        count = 0
         for msg in parse_hiqnet_stream(buf):
             if msg["type"] == MSG_MULTISET:
+                # Only require the source to be the Crown — don't filter on dst_node
+                # because the Crown may address us differently in some firmware versions.
                 src_node = struct.unpack_from(">H", msg["src"], 0)[0]
-                dst_node = struct.unpack_from(">H", msg["dst"], 0)[0]
-                if src_node == self.crown_node and dst_node == self._our_node:
-                    self._process_multiobj(parse_multiobj_payload(msg["payload"]))
+                if src_node == self.crown_node:
+                    objects = parse_multiobj_payload(msg["payload"])
+                    self._process_multiobj(objects)
+                    count += 1
 
-        _LOGGER.debug("Initial state read: %s", list(self._channels.values()))
+        _LOGGER.info("Parsed %d MultiObjectParamSet messages from initial TCP dump", count)
+        _LOGGER.debug("Channel state after init: %s", list(self._channels.values()))
 
     async def _start_udp(self) -> None:
         loop = asyncio.get_running_loop()
@@ -348,8 +371,7 @@ class CrownAmpClient:
                 for msg in parse_hiqnet_stream(chunk):
                     if msg["type"] == MSG_MULTISET:
                         src_node = struct.unpack_from(">H", msg["src"], 0)[0]
-                        dst_node = struct.unpack_from(">H", msg["dst"], 0)[0]
-                        if src_node == self.crown_node and dst_node == self._our_node:
+                        if src_node == self.crown_node:
                             self._process_multiobj(parse_multiobj_payload(msg["payload"]))
             except (asyncio.TimeoutError, TimeoutError):
                 pass
