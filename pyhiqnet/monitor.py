@@ -180,10 +180,14 @@ def _curses_main(stdscr):
             if col < w - 1:
                 stdscr.addstr(row, col, meter_s[:w - col - 1], va)
 
-        stdscr.addstr(h - 2, 0, "─" * min(w - 1, 80))
+        stdscr.addstr(h - 5, 0, "─" * min(w - 1, 80))
         mode = "Pwr-equiv (4Ω ref)" if show_power else "Raw voltage dBV"
-        stdscr.addstr(h - 1, 0, f"  {status}"[:w - 28], curses.A_DIM)
-        stdscr.addstr(h - 1, w - 27, f"  p={mode}  q=quit"[:26], curses.A_DIM)
+        stdscr.addstr(h - 5, w - 27, f"  p={mode}  q=quit"[:26], curses.A_DIM)
+        # Show last 4 status lines permanently so diagnostics are always visible
+        with _lock:
+            recent = list(_status[-4:])
+        for i, line in enumerate(recent):
+            stdscr.addstr(h - 4 + i, 0, f"  {line}"[:w - 1], curses.A_DIM)
 
         stdscr.refresh()
         time.sleep(0.1)
