@@ -214,8 +214,8 @@ class CrownAmpClient:
         self._tasks: list[asyncio.Task] = []  # type: ignore[type-arg]
 
         # Pre-build the two DiscoInfo variants
-        self._disco_q = build_discoinfo(our_node, crown_node, self._our_mac, self._our_ip, info=False)
-        self._disco_i = build_discoinfo(our_node, crown_node, self._our_mac, self._our_ip, info=True)
+        self._disco_q = build_discoinfo(self._our_node, crown_node, self._our_mac, self._our_ip, info=False)
+        self._disco_i = build_discoinfo(self._our_node, crown_node, self._our_mac, self._our_ip, info=True)
 
     # ── Public API ───────────────────────────────────────────────────────────
 
